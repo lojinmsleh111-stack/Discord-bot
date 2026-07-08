@@ -45,15 +45,13 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
-QUESTIONS = QUESTIONS = [
-    "**📌 السؤال الأول:**\n> اسمك روبلوكس (الأساسي)؟",
-    "**📌 السؤال الثاني:**\n> اسمك روبلوكس (الغير أساسي)؟",
-    "**📌 السؤال الثالث:**\n> كم عمرك؟",
-    "**📌 السؤال الرابع:**\n> هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
-    f"**📜 حلف التصريح:**\n\n{OATH_TEXT}\n\n**⚠️ تنبيه:** اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة 📜"
+QUESTIONS = [
+    "اسمك روبلوكس (الأساسي)؟",
+    "اسمك روبلوكس (الغير أساسي)؟",
+    "كم عمرك؟",
+    "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
+    f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
-
-
 
 SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسيرفر رول بلاي على روبلوكس.
 
@@ -167,7 +165,7 @@ class ApplyView(discord.ui.View):
         except Exception:
             logger.error(f"خطأ أثناء معالجة طلب المستخدم {user_id}:\n{traceback.format_exc()}")
             try:
-                await interaction.user.send("صار خطا غير متوقع اكمل المحاولة 🛑")
+                await interaction.user.send("⚠️ صار خطأ غير متوقع أثناء معالجة طلبك، حاول مرة ثانية لاحقاً.")
             except discord.Forbidden:
                 pass
         finally:
@@ -180,11 +178,17 @@ class ApplyView(discord.ui.View):
 
         try:
             dm = await interaction.user.create_dm()
-            await dm.send(
-                f"مرحباً {interaction.user.name} 👋\n"
-                "جاوب على الأسئلة التالية — كل سؤال برسالة منفصلة.\n"
-                "عندك **5 دقائق** للرد على كل سؤال."
+            
+            # تحويل رسالة الترحيب الأولى إلى Embed
+            welcome_embed = discord.Embed(
+                title="👋 مرحباً بكِ في التقديم!",
+                description="الرجاء الإجابة على الأسئلة التالية لتتم مراجعة طلبكِ.\n\n"
+                            "⚠️ **شروط التقديم:**\n"
+                            "• كل سؤال يجب الرد عليه برسالة منفصلة.\n"
+                            "• عندك **5 دقائق** فقط للرد على كل سؤال قبل إلغاء الطلب.",
+                color=0x3498db
             )
+            await dm.send(embed=welcome_embed)
         except discord.Forbidden:
             return
 
@@ -193,16 +197,33 @@ class ApplyView(discord.ui.View):
         def check(m):
             return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
-        for q in QUESTIONS:
-            await dm.send(f"**{q}**")
+        for idx, q in enumerate(QUESTIONS, start=1):
+            # تحويل الأسئلة إلى نظام الـ Embed بالكامل
+            question_embed = discord.Embed(
+                title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}",
+                description=f"**{q}**",
+                color=0x3498db
+            )
+            question_embed.set_footer(text="⏱️ متبقي لديكِ 5 دقائق للرد...")
+            await dm.send(embed=question_embed)
             try:
                 msg = await bot.wait_for("message", check=check, timeout=300)
                 answers.append(msg.content.strip())
             except asyncio.TimeoutError:
-                await dm.send("⏰ انتهى الوقت، اضغط الزر من جديد للمحاولة.")
+                timeout_embed = discord.Embed(
+                    title="⏳ انتهى الوقت!",
+                    description="للأسف استغرقتِ وقتاً طويلاً للرد. اضغطي على زر التقديم مجدداً في السيرفر للمحاولة مرة أخرى.",
+                    color=discord.Color.red()
+                )
+                await dm.send(embed=timeout_embed)
                 return
 
-        await dm.send("🔍 جاري التحقق من حساباتك على روبلوكس...")
+        checking_embed = discord.Embed(
+            title="🔍 جاري المعالجة...",
+            description="يتم الآن التحقق من حساباتكِ على روبلوكس ومراجعة الأجوبة بالذكاء الاصطناعي، يرجى الانتظار لحين صدور القرار.",
+            color=discord.Color.orange()
+        )
+        await dm.send(embed=checking_embed)
 
         # التحقق من الحسابين بالتوازي
         try:
@@ -232,8 +253,6 @@ class ApplyView(discord.ui.View):
                       f"الحساب الغير أساسي '{answers[1]}' غير موجود على روبلوكس",
                       primary_name, secondary_name, None)
             return
-
-        await dm.send("✅ تم التحقق من الحسابين! جاري مراجعة طلبك بالذكاء الاصطناعي...")
 
         try:
             result = evaluate_with_ai(primary_name, secondary_name, answers[2], answers[3], answers[4])
@@ -277,14 +296,21 @@ class ApplyView(discord.ui.View):
             }
             save_users(users)
 
-            await dm.send(
-                f"🎉 **تم قبول طلبك!**\n"
-                f"**السبب:** {reason}\n"
-                f"🪪 **رقم هويتك في الرول بلاي:** `{rp_id}`\n"
-                "احتفظ بهذا الرقم، سيُطلب منك في السيرفر."
+            accept_embed = discord.Embed(
+                title="🎉 مبارك! تم قبول طلبكِ",
+                description=f"**السبب:** {reason}\n\n"
+                            f"🆔 **رقم هويتكِ في الرول بلاي:** `{rp_id}`\n"
+                            "يرجى حفظ هذا الرقم جيداً لأنه سيُطلب منكِ داخل السيرفر.",
+                color=discord.Color.green()
             )
+            await dm.send(embed=accept_embed)
         else:
-            await dm.send(f"❌ **تم رفض طلبك.**\n**السبب:** {reason}")
+            reject_embed = discord.Embed(
+                title="❌ نعتذر، تم رفض طلبكِ",
+                description=f"**السبب:** {reason}\n\nيمكنكِ إعادة التقديم لاحقاً والتأكد من شروط الإجابة والالتزام بالقسم الحقيقي.",
+                color=discord.Color.red()
+            )
+            await dm.send(embed=reject_embed)
 
         # إرسال السجل لروم اللوق
         asyncio.create_task(
@@ -316,7 +342,7 @@ async def _send_log_async(interaction, answers, decision, reason, primary, secon
     )
     embed.add_field(name="السبب", value=reason, inline=True)
     if rp_id:
-        embed.add_field(name="🪪 رقم الهوية", value=f"`{rp_id}`", inline=True)
+        embed.add_field(name="🆔 رقم الهوية", value=f"`{rp_id}`", inline=True)
     embed.set_footer(text=f"Discord ID: {interaction.user.id}")
 
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
@@ -417,3 +443,4 @@ def run_bot():
 
 
 run_bot()
+    
