@@ -165,7 +165,7 @@ class ApplyView(discord.ui.View):
         except Exception:
             logger.error(f"خطأ أثناء معالجة طلب المستخدم {user_id}:\n{traceback.format_exc()}")
             try:
-                await interaction.user.send("⚠️ صار خطأ غير متوقع أثناء معالجة طلبك، حاول مرة ثانية لاحقاً.")
+                await interaction.user.send("")
             except discord.Forbidden:
                 pass
         finally:
