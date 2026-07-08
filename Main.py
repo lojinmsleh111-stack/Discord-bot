@@ -49,7 +49,7 @@ QUESTIONS = [
     "اسمك روبلوكس (الأساسي)؟",
     "اسمك روبلوكس (الغير أساسي)؟",
     "كم عمرك؟",
-    "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
+    "هل تتعهد بالالتزام الكامل بقوانين السيرفر？",
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
@@ -159,27 +159,25 @@ class ApplyView(discord.ui.View):
                 ephemeral=True
             )
 
+        # حل مشكلة خطأ غير متوقع بإعلام ديسكورد بالانتظار
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except:
+            pass
+
         active_applicants.add(user_id)
         try:
             await self._run_application(interaction)
         except Exception:
             logger.error(f"خطأ أثناء معالجة طلب المستخدم {user_id}:\n{traceback.format_exc()}")
-            try:
-                await interaction.user.send("⚠️ صار خطأ غير متوقع أثناء معالجة طلبك، حاول مرة ثانية لاحقاً.")
-            except discord.Forbidden:
-                pass
         finally:
             active_applicants.discard(user_id)
 
     async def _run_application(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "📩 راسلتك بالخاص، تفقد الرسائل الخاصة!", ephemeral=True
-        )
-
         try:
             dm = await interaction.user.create_dm()
             
-            # تحويل رسالة الترحيب الأولى إلى Embed
+            # رسالة الترحيب الأولى كـ Embed
             welcome_embed = discord.Embed(
                 title="👋 مرحباً بكِ في التقديم!",
                 description="الرجاء الإجابة على الأسئلة التالية لتتم مراجعة طلبكِ.\n\n"
@@ -198,7 +196,7 @@ class ApplyView(discord.ui.View):
             return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
         for idx, q in enumerate(QUESTIONS, start=1):
-            # تحويل الأسئلة إلى نظام الـ Embed بالكامل
+            # الأسئلة بنظام الـ Embed بالكامل
             question_embed = discord.Embed(
                 title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}",
                 description=f"**{q}**",
@@ -443,4 +441,3 @@ def run_bot():
 
 
 run_bot()
-    
