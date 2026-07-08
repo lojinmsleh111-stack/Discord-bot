@@ -45,11 +45,12 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
+# ─── تم تعديل الأسئلة هنا بناءً على طلبكِ ───
 QUESTIONS = [
     "اسمك روبلوكس (الأساسي)؟",
-    "اسمك روبلوكس (الغير أساسي)؟",
+    "اسمك روبلوكس (الغير أساسي)？",
     "كم عمرك؟",
-    "هل تتعهد بالالتزام الكامل بقوانين السيرفر？",
+    "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
@@ -152,14 +153,12 @@ class ApplyView(discord.ui.View):
     async def apply(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = interaction.user.id
 
-        # ─── منع التقديم المكرر ───
         if user_id in active_applicants:
             return await interaction.response.send_message(
                 "⚠️ عندك طلب تقديم شغال حالياً بالخاص، كمّل عليه أو انتظر انتهاء وقته.",
                 ephemeral=True
             )
 
-        # حل مشكلة خطأ غير متوقع بإعلام ديسكورد بالانتظار
         try:
             await interaction.response.defer(ephemeral=True)
         except:
@@ -177,7 +176,6 @@ class ApplyView(discord.ui.View):
         try:
             dm = await interaction.user.create_dm()
             
-            # رسالة الترحيب الأولى كـ Embed
             welcome_embed = discord.Embed(
                 title="👋 مرحباً بكِ في التقديم!",
                 description="الرجاء الإجابة على الأسئلة التالية لتتم مراجعة طلبكِ.\n\n"
@@ -196,7 +194,6 @@ class ApplyView(discord.ui.View):
             return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
         for idx, q in enumerate(QUESTIONS, start=1):
-            # الأسئلة بنظام الـ Embed بالكامل
             question_embed = discord.Embed(
                 title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}",
                 description=f"**{q}**",
@@ -223,7 +220,6 @@ class ApplyView(discord.ui.View):
         )
         await dm.send(embed=checking_embed)
 
-        # التحقق من الحسابين بالتوازي
         try:
             primary_ok, primary_name = await check_roblox_username(answers[0])
             secondary_ok, secondary_name = await check_roblox_username(answers[1])
@@ -277,14 +273,12 @@ class ApplyView(discord.ui.View):
                 except discord.Forbidden:
                     logger.warning(f"صلاحيات ناقصة: ما قدرت أعطي رتبة القبول للعضو {member.id}")
 
-            # تغيير الاسم في السيرفر
             if member:
                 try:
                     await member.edit(nick=f"RC | {primary_name} | {rp_id}")
                 except discord.Forbidden:
                     logger.warning(f"صلاحيات ناقصة: ما قدرت أغير اسم العضو {member.id}")
 
-            # حفظ المستخدم في الملف
             users = load_users()
             users[str(interaction.user.id)] = {
                 "discord_tag": str(interaction.user),
@@ -310,7 +304,6 @@ class ApplyView(discord.ui.View):
             )
             await dm.send(embed=reject_embed)
 
-        # إرسال السجل لروم اللوق
         asyncio.create_task(
             _send_log_async(interaction, answers, decision, reason,
                             primary_name, secondary_name, rp_id)
@@ -349,7 +342,6 @@ async def _send_log_async(interaction, answers, decision, reason, primary, secon
         await log_channel.send(embed=embed, view=view)
 
 
-# ─── زر إزالة القبول ───
 class RevokeView(discord.ui.View):
     def __init__(self, applicant_id: int):
         super().__init__(timeout=None)
@@ -370,7 +362,6 @@ class RevokeView(discord.ui.View):
             except discord.Forbidden:
                 pass
 
-        # حذف من قاعدة البيانات
         users = load_users()
         if str(self.applicant_id) in users:
             del users[str(self.applicant_id)]
@@ -441,3 +432,4 @@ def run_bot():
 
 
 run_bot()
+    
