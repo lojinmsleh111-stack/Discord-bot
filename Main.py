@@ -20,6 +20,9 @@ LOG_CHANNEL_ID = 1524146309940904022
 STAFF_ROLE_ID = 1524373417137016833
 ACCEPTED_ROLE_ID = 1524374959751827466
 
+# 🆔 تم وضع آيدي الرتبة المراد إزالتها تلقائياً عند القبول:
+UNACCEPTED_ROLE_ID = 1524374666435887104  
+
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 # ================================================
 
@@ -37,7 +40,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# مجموعة تتبع المستخدمين اللي عندهم طلب تقديم شغال حالياً (منع التقديم المكرر)
 active_applicants: set[int] = set()
 
 OATH_TEXT = (
@@ -45,10 +47,9 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
-# ─── تم تعديل الأسئلة هنا بناءً على طلبكِ ───
 QUESTIONS = [
     "اسمك روبلوكس (الأساسي)؟",
-    "اسمك روبلوكس (الغير أساسي)？",
+    "اسمك روبلوكس (الغير أساسي)؟",
     "كم عمرك؟",
     "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
@@ -65,7 +66,7 @@ SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسير
 
 معايير التقييم الصارمة:
 1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99. ارفض فوراً إذا كان أقل من 8، أكبر من 99، أو غير رقمي أو مكتوب بحروف.
-2. التعهد: يجب أن يكون صريحاً وإيجابياً (مثل: نعم، أتعهد، موافق، أوك). ارفض إذا تهرب، أجاب بـ"لا"، أو لم يرد بوضوح.
+2. التعهد: يجب أن يكون صريحاً وإيجابياً (مثل: نعم، أتعهد، موافق، أوك). ارفض إذا تهرب, أجاب بـ"لا"، أو لم يرد بوضوح.
 3. حلف التصريح: يجب أن يكون نفس نص القسم الرسمي تقريباً (يسمح بفروقات بسيطة بالإملاء) مع استبدال (اسمك) باسم حقيقي واضح. ارفض إذا نسخ النص بدون استبدال (اسمك)، أو غيّر بمعنى القسم، أو كتب شيء مختلف تماماً، أو تركه فاضي.
 4. لا تقبل إجابات مراوغة أو غامضة في أي من الأسئلة.
 
@@ -75,7 +76,6 @@ SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسير
 {"decision": "reject", "reason": "سبب مختصر بالعربي واضح"}"""
 
 
-# ─── قاعدة بيانات المستخدمين المقبولين ───
 def load_users() -> dict:
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, "r", encoding="utf-8") as f:
@@ -95,7 +95,6 @@ def generate_unique_id() -> str:
             return new_id
 
 
-# ─── التحقق من اسم روبلوكس عبر API ───
 async def check_roblox_username(username: str) -> tuple[bool, str]:
     url = "https://users.roblox.com/v1/usernames/users"
     payload = {"usernames": [username.strip()], "excludeBannedUsers": False}
@@ -116,7 +115,6 @@ async def check_roblox_username(username: str) -> tuple[bool, str]:
     return False, username
 
 
-# ─── تقييم AI ───
 def evaluate_with_ai(primary: str, secondary: str, age: str, pledge: str, oath: str) -> dict:
     content = (
         f"الحساب الأساسي: {primary} (موجود ✅)\n"
@@ -143,7 +141,6 @@ def evaluate_with_ai(primary: str, secondary: str, age: str, pledge: str, oath: 
         return {"decision": "reject", "reason": "تعذر تقييم الطلب تلقائياً"}
 
 
-# ─── زر التقديم ───
 class ApplyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -266,6 +263,7 @@ class ApplyView(discord.ui.View):
         if decision == "accept":
             rp_id = generate_unique_id()
 
+            # 1. إعطاء رتبة القبول
             role = interaction.guild.get_role(ACCEPTED_ROLE_ID)
             if role and member:
                 try:
@@ -273,6 +271,15 @@ class ApplyView(discord.ui.View):
                 except discord.Forbidden:
                     logger.warning(f"صلاحيات ناقصة: ما قدرت أعطي رتبة القبول للعضو {member.id}")
 
+            # 2. إزالة الرتبة المحددة (تم التعديل بآيدي رتبتكِ الجديد ✨)
+            unaccepted_role = interaction.guild.get_role(UNACCEPTED_ROLE_ID)
+            if unaccepted_role and member:
+                try:
+                    await member.remove_roles(unaccepted_role)
+                except discord.Forbidden:
+                    logger.warning(f"صلاحيات ناقصة: ما قدرت أشيل الرتبة من العضو {member.id}")
+
+            # 3. تغيير الاسم في السيرفر
             if member:
                 try:
                     await member.edit(nick=f"RC | {primary_name} | {rp_id}")
@@ -432,4 +439,4 @@ def run_bot():
 
 
 run_bot()
-    
+            
