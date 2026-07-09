@@ -20,7 +20,7 @@ LOG_CHANNEL_ID = 1524146309940904022
 STAFF_ROLE_ID = 1524373417137016833
 ACCEPTED_ROLE_ID = 1524374959751827466
 
-# 🆔 تم وضع آيدي الرتبة المراد إزالتها تلقائياً عند القبول:
+# 🆔 آيدي الرتبة المراد إزالتها تلقائياً عند القبول:
 UNACCEPTED_ROLE_ID = 1524374666435887104  
 
 USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
@@ -66,7 +66,7 @@ SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسير
 
 معايير التقييم الصارمة:
 1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99. ارفض فوراً إذا كان أقل من 8، أكبر من 99، أو غير رقمي أو مكتوب بحروف.
-2. التعهد: يجب أن يكون صريحاً وإيجابياً (مثل: نعم، أتعهد، موافق، أوك). ارفض إذا تهرب, أجاب بـ"لا"، أو لم يرد بوضوح.
+2. التعهد: يجب أن يكون صريحاً وإيجابياً (مثل: نعم، أتعهد، موافق، أوك). ارفض إذا تهرب، أجاب بـ"لا"، أو لم يرد بوضوح.
 3. حلف التصريح: يجب أن يكون نفس نص القسم الرسمي تقريباً (يسمح بفروقات بسيطة بالإملاء) مع استبدال (اسمك) باسم حقيقي واضح. ارفض إذا نسخ النص بدون استبدال (اسمك)، أو غيّر بمعنى القسم، أو كتب شيء مختلف تماماً، أو تركه فاضي.
 4. لا تقبل إجابات مراوغة أو غامضة في أي من الأسئلة.
 
@@ -156,17 +156,11 @@ class ApplyView(discord.ui.View):
                 ephemeral=True
             )
 
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except:
-            pass
-
         active_applicants.add(user_id)
         try:
             await self._run_application(interaction)
         except Exception:
             logger.error(f"خطأ أثناء معالجة طلب المستخدم {user_id}:\n{traceback.format_exc()}")
-        finally:
             active_applicants.discard(user_id)
 
     async def _run_application(self, interaction: discord.Interaction):
@@ -182,145 +176,155 @@ class ApplyView(discord.ui.View):
                 color=0x3498db
             )
             await dm.send(embed=welcome_embed)
+            
+            # ─── رسالة التأكيد باللغة العربية (مطابقة للتصميم الأخضر) ───
+            image_style_embed = discord.Embed(
+                title="بدء تقديم الطلب",
+                description="تم إرسال أسئلة التقديم بنجاح إلى رسائلك الخاصة!",
+                color=0x2ecc71 # اللون الأخضر المطابق للصورة تماماً ✅
+            )
+            
+            # زر ينقل المستخدم مباشرة للمحادثة الخاصة بالبوت
+            jump_view = discord.ui.View()
+            jump_view.add_item(discord.ui.Button(
+                label="الانتقال إلى الخاص", 
+                url="https://discord.com/channels/@me", 
+                style=discord.ButtonStyle.link
+            ))
+            
+            # الرد الفوري المخفي (Ephemeral)
+            await interaction.response.send_message(embed=image_style_embed, view=jump_view, ephemeral=True)
+            
         except discord.Forbidden:
+            active_applicants.discard(interaction.user.id)
+            error_embed = discord.Embed(
+                title="الرسائل الخاصة مغلقة",
+                description="يرجى فتح الرسائل الخاصة (DMs) في إعدادات خصوصية السيرفر لتتمكن من استلام الأسئلة.",
+                color=discord.Color.red()
+            )
+            try:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            except:
+                pass
             return
 
-        answers = []
+        asyncio.create_task(self._collect_answers(interaction, dm))
 
+    async def _collect_answers(self, interaction: discord.Interaction, dm: discord.DMChannel):
+        answers = []
         def check(m):
             return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
-        for idx, q in enumerate(QUESTIONS, start=1):
-            question_embed = discord.Embed(
-                title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}",
-                description=f"**{q}**",
-                color=0x3498db
-            )
-            question_embed.set_footer(text="⏱️ متبقي لديكِ 5 دقائق للرد...")
-            await dm.send(embed=question_embed)
-            try:
-                msg = await bot.wait_for("message", check=check, timeout=300)
-                answers.append(msg.content.strip())
-            except asyncio.TimeoutError:
-                timeout_embed = discord.Embed(
-                    title="⏳ انتهى الوقت!",
-                    description="للأسف استغرقتِ وقتاً طويلاً للرد. اضغطي على زر التقديم مجدداً في السيرفر للمحاولة مرة أخرى.",
-                    color=discord.Color.red()
+        try:
+            for idx, q in enumerate(QUESTIONS, start=1):
+                question_embed = discord.Embed(
+                    title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}",
+                    description=f"**{q}**",
+                    color=0x3498db
                 )
-                await dm.send(embed=timeout_embed)
+                question_embed.set_footer(text="⏱️ متبقي لديكِ 5 دقائق للرد...")
+                await dm.send(embed=question_embed)
+                try:
+                    msg = await bot.wait_for("message", check=check, timeout=300)
+                    answers.append(msg.content.strip())
+                except asyncio.TimeoutError:
+                    timeout_embed = discord.Embed(
+                        title="⏳ انتهى الوقت!",
+                        description="للأسف استغرقتِ وقتاً طويلاً للرد. اضغطي على زر التقديم مجدداً في السيرفر للمحاولة مرة أخرى.",
+                        color=discord.Color.red()
+                    )
+                    await dm.send(embed=timeout_embed)
+                    return
+
+            checking_embed = discord.Embed(
+                title="🔍 جاري المعالجة...",
+                description="يتم الآن التحقق من حساباتكِ على روبلوكس ومراجعة الأجوبة بالذكاء الاصطناعي، يرجى الانتظار لحين صدور القرار.",
+                color=discord.Color.orange()
+            )
+            await dm.send(embed=checking_embed)
+
+            try:
+                primary_ok, primary_name = await check_roblox_username(answers[0])
+                secondary_ok, secondary_name = await check_roblox_username(answers[1])
+            except Exception:
+                logger.error(f"خطأ أثناء التحقق من روبلوكس:\n{traceback.format_exc()}")
+                await dm.send("⚠️ صار خطأ أثناء التحقق من حساباتك على روبلوكس، حاول مرة ثانية لاحقاً.")
                 return
 
-        checking_embed = discord.Embed(
-            title="🔍 جاري المعالجة...",
-            description="يتم الآن التحقق من حساباتكِ على روبلوكس ومراجعة الأجوبة بالذكاء الاصطناعي، يرجى الانتظار لحين صدور القرار.",
-            color=discord.Color.orange()
-        )
-        await dm.send(embed=checking_embed)
+            if not primary_ok:
+                await dm.send(f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[0]}**.\nتأكد من صحة الاسم وأعد المحاولة.")
+                _send_log(interaction, answers, "reject", f"الحساب الأساسي '{answers[0]}' غير موجود على روبلوكس", primary_name, secondary_name, None)
+                return
 
-        try:
-            primary_ok, primary_name = await check_roblox_username(answers[0])
-            secondary_ok, secondary_name = await check_roblox_username(answers[1])
+            if not secondary_ok:
+                await dm.send(f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[1]}**.\nتأكد من صحة الاسم وأعد المحاولة.")
+                _send_log(interaction, answers, "reject", f"الحساب الغير أساسي '{answers[1]}' غير موجود على روبلوكس", primary_name, secondary_name, None)
+                return
+
+            try:
+                result = evaluate_with_ai(primary_name, secondary_name, answers[2], answers[3], answers[4])
+            except Exception:
+                logger.error(f"خطأ أثناء تقييم AI:\n{traceback.format_exc()}")
+                await dm.send("⚠️ صار خطأ أثناء تقييم طلبك بالذكاء الاصطناعي، تواصل مع الإدارة.")
+                _send_log(interaction, answers, "reject", "خطأ تقني أثناء تقييم AI", primary_name, secondary_name, None)
+                return
+
+            decision = result.get("decision", "reject")
+            reason = result.get("reason", "بدون سبب")
+
+            member = interaction.guild.get_member(interaction.user.id)
+            rp_id = None
+
+            if decision == "accept":
+                rp_id = generate_unique_id()
+
+                role = interaction.guild.get_role(ACCEPTED_ROLE_ID)
+                if role and member:
+                    try: await member.add_roles(role)
+                    except: pass
+
+                unaccepted_role = interaction.guild.get_role(UNACCEPTED_ROLE_ID)
+                if unaccepted_role and member:
+                    try: await member.remove_roles(unaccepted_role)
+                    except: pass
+
+                if member:
+                    try: await member.edit(nick=f"RC | {primary_name} | {rp_id}")
+                    except: pass
+
+                users = load_users()
+                users[str(interaction.user.id)] = {
+                    "discord_tag": str(interaction.user),
+                    "roblox_primary": primary_name,
+                    "roblox_secondary": secondary_name,
+                    "rp_id": rp_id
+                }
+                save_users(users)
+
+                accept_embed = discord.Embed(
+                    title="🎉 مبارك! تم قبول طلبكِ",
+                    description=f"**السبب:** {reason}\n\n🆔 **رقم هويتكِ في الرول بلاي:** `{rp_id}`\nيرجى حفظ هذا الرقم جيداً لأنه سيُطلب منكِ داخل السيرفر.",
+                    color=discord.Color.green()
+                )
+                await dm.send(embed=accept_embed)
+            else:
+                reject_embed = discord.Embed(
+                    title="❌ نعتذر، تم رفض طلبكِ",
+                    description=f"**السبب:** {reason}\n\nيمكنكِ إعادة التقديم لاحقاً والتأكد من شروط الإجابة والالتزام بالقسم الحقيقي.",
+                    color=discord.Color.red()
+                )
+                await dm.send(embed=reject_embed)
+
+            await _send_log_async(interaction, answers, decision, reason, primary_name, secondary_name, rp_id)
+
         except Exception:
-            logger.error(f"خطأ أثناء التحقق من روبلوكس:\n{traceback.format_exc()}")
-            await dm.send("⚠️ صار خطأ أثناء التحقق من حساباتك على روبلوكس، حاول مرة ثانية لاحقاً.")
-            return
-
-        if not primary_ok:
-            await dm.send(
-                f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[0]}**.\n"
-                "تأكد من صحة الاسم وأعد المحاولة."
-            )
-            _send_log(interaction, answers, "reject",
-                      f"الحساب الأساسي '{answers[0]}' غير موجود على روبلوكس",
-                      primary_name, secondary_name, None)
-            return
-
-        if not secondary_ok:
-            await dm.send(
-                f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[1]}**.\n"
-                "تأكد من صحة الاسم وأعد المحاولة."
-            )
-            _send_log(interaction, answers, "reject",
-                      f"الحساب الغير أساسي '{answers[1]}' غير موجود على روبلوكس",
-                      primary_name, secondary_name, None)
-            return
-
-        try:
-            result = evaluate_with_ai(primary_name, secondary_name, answers[2], answers[3], answers[4])
-        except Exception:
-            logger.error(f"خطأ أثناء تقييم AI:\n{traceback.format_exc()}")
-            await dm.send("⚠️ صار خطأ أثناء تقييم طلبك بالذكاء الاصطناعي، تواصل مع الإدارة.")
-            _send_log(interaction, answers, "reject", "خطأ تقني أثناء تقييم AI",
-                      primary_name, secondary_name, None)
-            return
-
-        decision = result.get("decision", "reject")
-        reason = result.get("reason", "بدون سبب")
-
-        member = interaction.guild.get_member(interaction.user.id)
-        rp_id = None
-
-        if decision == "accept":
-            rp_id = generate_unique_id()
-
-            # 1. إعطاء رتبة القبول
-            role = interaction.guild.get_role(ACCEPTED_ROLE_ID)
-            if role and member:
-                try:
-                    await member.add_roles(role)
-                except discord.Forbidden:
-                    logger.warning(f"صلاحيات ناقصة: ما قدرت أعطي رتبة القبول للعضو {member.id}")
-
-            # 2. إزالة الرتبة المحددة (تم التعديل بآيدي رتبتكِ الجديد ✨)
-            unaccepted_role = interaction.guild.get_role(UNACCEPTED_ROLE_ID)
-            if unaccepted_role and member:
-                try:
-                    await member.remove_roles(unaccepted_role)
-                except discord.Forbidden:
-                    logger.warning(f"صلاحيات ناقصة: ما قدرت أشيل الرتبة من العضو {member.id}")
-
-            # 3. تغيير الاسم في السيرفر
-            if member:
-                try:
-                    await member.edit(nick=f"RC | {primary_name} | {rp_id}")
-                except discord.Forbidden:
-                    logger.warning(f"صلاحيات ناقصة: ما قدرت أغير اسم العضو {member.id}")
-
-            users = load_users()
-            users[str(interaction.user.id)] = {
-                "discord_tag": str(interaction.user),
-                "roblox_primary": primary_name,
-                "roblox_secondary": secondary_name,
-                "rp_id": rp_id
-            }
-            save_users(users)
-
-            accept_embed = discord.Embed(
-                title="🎉 مبارك! تم قبول طلبكِ",
-                description=f"**السبب:** {reason}\n\n"
-                            f"🆔 **رقم هويتكِ في الرول بلاي:** `{rp_id}`\n"
-                            "يرجى حفظ هذا الرقم جيداً لأنه سيُطلب منكِ داخل السيرفر.",
-                color=discord.Color.green()
-            )
-            await dm.send(embed=accept_embed)
-        else:
-            reject_embed = discord.Embed(
-                title="❌ نعتذر، تم رفض طلبكِ",
-                description=f"**السبب:** {reason}\n\nيمكنكِ إعادة التقديم لاحقاً والتأكد من شروط الإجابة والالتزام بالقسم الحقيقي.",
-                color=discord.Color.red()
-            )
-            await dm.send(embed=reject_embed)
-
-        asyncio.create_task(
-            _send_log_async(interaction, answers, decision, reason,
-                            primary_name, secondary_name, rp_id)
-        )
+            logger.error(f"خطأ أثناء جمع الأجوبة:\n{traceback.format_exc()}")
+        finally:
+            active_applicants.discard(interaction.user.id)
 
 
 def _send_log(interaction, answers, decision, reason, primary, secondary, rp_id):
-    asyncio.create_task(
-        _send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id)
-    )
+    asyncio.create_task(_send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id))
 
 
 async def _send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id):
@@ -329,15 +333,11 @@ async def _send_log_async(interaction, answers, decision, reason, primary, secon
     embed.add_field(name="العضو", value=interaction.user.mention, inline=False)
     embed.add_field(name="حساب أساسي", value=f"`{primary}`", inline=True)
     embed.add_field(name="حساب غير أساسي", value=f"`{secondary}`", inline=True)
-    embed.add_field(name="العمر", value=answers[2], inline=True)
-    embed.add_field(name="التعهد", value=answers[3][:500], inline=False)
+    embed.add_field(name="العمر", value=answers[2] if len(answers) > 2 else "غير معروف", inline=True)
+    embed.add_field(name="التعهد", value=answers[3][:500] if len(answers) > 3 else "غير معروف", inline=False)
     if len(answers) > 4:
         embed.add_field(name="حلف التصريح", value=answers[4][:800], inline=False)
-    embed.add_field(
-        name="قرار البوت",
-        value="✅ قبول" if decision == "accept" else "❌ رفض",
-        inline=True
-    )
+    embed.add_field(name="قرار البوت", value="✅ قبول" if decision == "accept" else "❌ رفض", inline=True)
     embed.add_field(name="السبب", value=reason, inline=True)
     if rp_id:
         embed.add_field(name="🆔 رقم الهوية", value=f"`{rp_id}`", inline=True)
@@ -364,10 +364,8 @@ class RevokeView(discord.ui.View):
         role = interaction.guild.get_role(ACCEPTED_ROLE_ID)
         if member and role and role in member.roles:
             await member.remove_roles(role)
-            try:
-                await member.send("⚠️ تم سحب رتبة الرول بلاي منك بواسطة الإدارة.")
-            except discord.Forbidden:
-                pass
+            try: await member.send("⚠️ تم سحب رتبة الرول بلاي منك بواسطة الإدارة.")
+            except: pass
 
         users = load_users()
         if str(self.applicant_id) in users:
@@ -377,9 +375,7 @@ class RevokeView(discord.ui.View):
         button.disabled = True
         button.label = "تم السحب"
         await interaction.message.edit(view=self)
-        await interaction.response.send_message(
-            f"تم سحب القبول بواسطة {interaction.user.mention}", ephemeral=False
-        )
+        await interaction.response.send_message(f"تم سحب القبول بواسطة {interaction.user.mention}", ephemeral=False)
 
 
 @bot.command()
@@ -398,10 +394,7 @@ async def setup_apply(ctx):
 @bot.event
 async def on_ready():
     bot.add_view(ApplyView())
-    await bot.change_presence(
-        status=discord.Status.online,
-        activity=discord.CustomActivity(name="Distributing")
-    )
+    await bot.change_presence(status=discord.Status.online, activity=discord.CustomActivity(name="Distributing"))
     logger.info(f"✅ البوت شغال باسم {bot.user}")
 
 
@@ -412,10 +405,8 @@ async def on_error(event, *args, **kwargs):
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        return await ctx.send("❌ ما تملك صلاحية تنفيذ هذا الأمر.")
-    if isinstance(error, commands.CommandNotFound):
-        return
+    if isinstance(error, commands.MissingPermissions): return await ctx.send("❌ ما تملك صلاحية تنفيذ هذا الأمر.")
+    if isinstance(error, commands.CommandNotFound): return
     logger.error(f"خطأ بأمر '{ctx.command}':\n{''.join(traceback.format_exception(type(error), error, error.__traceback__))}")
     await ctx.send("⚠️ صار خطأ أثناء تنفيذ الأمر، تم تسجيله للمراجعة.")
 
@@ -434,9 +425,7 @@ def run_bot():
             import time
             time.sleep(5)
             continue
-        else:
-            break
-
+        else: break
 
 run_bot()
             
