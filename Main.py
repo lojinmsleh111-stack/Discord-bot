@@ -47,33 +47,36 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
+# 🔄 ترتيب الأسئلة الجديد:
 QUESTIONS = [
     "اسمك روبلوكس (الأساسي)؟",
     "اسمك روبلوكس (الغير أساسي)؟",
-    "كم عمرك؟",
+    "كم عمرك？",
+    "📸 يرجى إرسال لقطة شاشة (صورة) لحسابك في روبلوكس يظهر فيها اسم الحساب بوضوح:",
     "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
-SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسيرفر رول بلاي على روبلوكس.
+SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسيرفر رول بلاي على روبلوكس ومحلل صور متقدم.
 
 ستستلم المعلومات التالية:
-- اسم الحساب الأساسي (تم التحقق من وجوده عبر API روبلوكس ✅)
-- اسم الحساب الغير أساسي (تم التحقق من وجوده عبر API روبلوكس ✅)
+- اسم الحساب الأساسي المكتوب: (تم التحقق منه)
+- اسم الحساب الغير أساسي المكتوب: (تم التحقق منه)
 - عمر المتقدم
+- رابط صورة لقطة الشاشة المرفقة للحساب الشخصي
 - تعهده بالالتزام بالقوانين
-- نص حلف التصريح اللي كتبه المتقدم (يفترض يكون نفس نص القسم الرسمي مع استبدال (اسمك) باسمه)
+- نص حلف التصريح
 
 معايير التقييم الصارمة:
-1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99. ارفض فوراً إذا كان أقل من 8، أكبر من 99، أو غير رقمي أو مكتوب بحروف.
-2. التعهد: يجب أن يكون صريحاً وإيجابياً (مثل: نعم، أتعهد، ايه، موافق، أوك). ارفض إذا تهرب، أجاب بـ"لا"، أو لم يرد بوضوح.
-3. حلف التصريح: يجب أن يكون نفس نص القسم الرسمي تقريباً (يسمح بفروقات بسيطة بالإملاء) مع استبدال (اسمك) باسم حقيقي واضح. ارفض إذا نسخ النص بدون استبدال (اسمك)، أو غيّر بمعنى القسم، أو كتب شيء مختلف تماماً، أو تركه فاضي.
-4. لا تقبل إجابات مراوغة أو غامضة في أي من الأسئلة.
+1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99.
+2. مطابقة الصورة: يجب عليك تحليل النص والرؤية داخل الصورة المرفقة. تأكد تماماً أن اسم المستخدم الظاهر في الصورة (Username أو Display Name) يطابق إما "اسم الحساب الأساسي" أو "اسم الحساب الغير أساسي" الذي أدخله المتقدم. إذا كانت الصورة عشوائية، لا تحتوي على حساب روبلوكس، أو الأسماء فيها مختلفة تماماً ولا صلة لها بالأسماء المكتوبة، ارفض الطلب فوراً.
+3. التعهد: يجب أن يكون صريحاً وإيجابياً.
+4. حلف التصريح: يجب استبدال (اسمك) باسم حقيقي واضح والالتزام بالنص الأساسي.
 
 رد فقط بصيغة JSON بدون أي نص إضافي، بهذا الشكل:
 {"decision": "accept", "reason": "سبب مختصر بالعربي"}
 أو
-{"decision": "reject", "reason": "سبب مختصر بالعربي واضح"}"""
+{"decision": "reject", "reason": "سبب مختصر بالعربي واضح لرفض الصورة أو الأجوبة"}"""
 
 
 def load_users() -> dict:
@@ -115,17 +118,32 @@ async def check_roblox_username(username: str) -> tuple[bool, str]:
     return False, username
 
 
-def evaluate_with_ai(primary: str, secondary: str, age: str, pledge: str, oath: str) -> dict:
-    content = (
-        f"الحساب الأساسي: {primary} (موجود ✅)\n"
-        f"الحساب الغير أساسي: {secondary} (موجود ✅)\n"
-        f"العمر: {age}\n"
-        f"التعهد بالقوانين: {pledge}\n\n"
-        f"نص القسم الرسمي: {OATH_TEXT}\n"
-        f"حلف التصريح اللي كتبه المتقدم: {oath}"
-    )
+def evaluate_with_ai(primary: str, secondary: str, age: str, image_url: str, pledge: str, oath: str) -> dict:
+    content = [
+        {
+            "type": "text",
+            "text": (
+                f"الحساب الأساسي المكتوب: {primary}\n"
+                f"الحساب الغير أساسي المكتوب: {secondary}\n"
+                f"العمر: {age}\n"
+                f"التعهد بالقوانين: {pledge}\n\n"
+                f"نص القسم الرسمي: {OATH_TEXT}\n"
+                f"حلف التصريح المكتوب: {oath}\n"
+                f"يرجى مطابقة هذه البيانات مع الصورة المرفقة أدناه والتأكد من صحة الحساب والحلف والتعهد."
+            )
+        }
+    ]
+    
+    if image_url:
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": image_url
+            }
+        })
+
     response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama-3.2-90b-vision-preview",
         max_tokens=200,
         temperature=0.1,
         messages=[
@@ -138,7 +156,7 @@ def evaluate_with_ai(primary: str, secondary: str, age: str, pledge: str, oath: 
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return {"decision": "reject", "reason": "تعذر تقييم الطلب تلقائياً"}
+        return {"decision": "reject", "reason": "تعذر تقييم الطلب أو قراءة الصورة تلقائياً"}
 
 
 class ApplyView(discord.ui.View):
@@ -172,19 +190,18 @@ class ApplyView(discord.ui.View):
                 description="الرجاء الإجابة على الأسئلة التالية لتتم مراجعة طلبكِ.\n\n"
                             "⚠️ **شروط التقديم:**\n"
                             "• كل سؤال يجب الرد عليه برسالة منفصلة.\n"
+                            "• أحد الأسئلة يتطلب رفع صورة (لقطة شاشة) لحسابك.\n"
                             "• عندك **5 دقائق** فقط للرد على كل سؤال قبل إلغاء الطلب.",
                 color=0x3498db
             )
             await dm.send(embed=welcome_embed)
             
-            # ─── رسالة التأكيد باللغة العربية (مطابقة للتصميم الأخضر) ───
             image_style_embed = discord.Embed(
                 title="بدء تقديم الطلب",
                 description="تم إرسال أسئلة التقديم بنجاح إلى رسائلك الخاصة!",
-                color=0x2ecc71 # اللون الأخضر المطابق للصورة تماماً ✅
+                color=0x2ecc71 
             )
             
-            # زر ينقل المستخدم مباشرة للمحادثة الخاصة بالبوت
             jump_view = discord.ui.View()
             jump_view.add_item(discord.ui.Button(
                 label="الانتقال إلى الخاص", 
@@ -192,26 +209,25 @@ class ApplyView(discord.ui.View):
                 style=discord.ButtonStyle.link
             ))
             
-            # الرد الفوري المخفي (Ephemeral)
             await interaction.response.send_message(embed=image_style_embed, view=jump_view, ephemeral=True)
             
         except discord.Forbidden:
             active_applicants.discard(interaction.user.id)
             error_embed = discord.Embed(
                 title="الرسائل الخاصة مغلقة",
-                description="يرجى فتح الرسائل الخاصة (DMs) في إعدادات خصوصية السيرفر لتتمكن من استلام الأسئلة.",
+                description="يرجى فتح الرسائل الخاصة (DMs) in إعدادات خصوصية السيرفر لتتمكن من استلام الأسئلة.",
                 color=discord.Color.red()
             )
-            try:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
-            except:
-                pass
+            try: await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            except: pass
             return
 
         asyncio.create_task(self._collect_answers(interaction, dm))
 
     async def _collect_answers(self, interaction: discord.Interaction, dm: discord.DMChannel):
         answers = []
+        image_url = None
+        
         def check(m):
             return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
@@ -224,9 +240,23 @@ class ApplyView(discord.ui.View):
                 )
                 question_embed.set_footer(text="⏱️ متبقي لديكِ 5 دقائق للرد...")
                 await dm.send(embed=question_embed)
+                
                 try:
                     msg = await bot.wait_for("message", check=check, timeout=300)
-                    answers.append(msg.content.strip())
+                    
+                    # الفحص بناءً على رقم السؤال الجديد (السؤال الرابع هو الصورة 📸)
+                    if idx == 4:
+                        if msg.attachments:
+                            image_url = msg.attachments[0].url
+                            answers.append("[تم إرفاق صورة الحساب]")
+                        else:
+                            await dm.send("⚠️ يرجى إرسال ملف صورة (لقطة شاشة) وليس نصاً مكتوباً.")
+                            # إعادة تشغيل تجميع الأجوبة من جديد لتفادي التداخل
+                            active_applicants.discard(interaction.user.id)
+                            return
+                    else:
+                        answers.append(msg.content.strip())
+                        
                 except asyncio.TimeoutError:
                     timeout_embed = discord.Embed(
                         title="⏳ انتهى الوقت!",
@@ -237,8 +267,8 @@ class ApplyView(discord.ui.View):
                     return
 
             checking_embed = discord.Embed(
-                title="🔍 جاري المعالجة...",
-                description="يتم الآن التحقق من حساباتكِ على روبلوكس ومراجعة الأجوبة بالذكاء الاصطناعي، يرجى الانتظار لحين صدور القرار.",
+                title="🔍 جاري المعالجة والمطابقة...",
+                description="يتم الآن التحقق من الحسابات بالذكاء الاصطناعي ومطابقة الصورة، يرجى الانتظار...",
                 color=discord.Color.orange()
             )
             await dm.send(embed=checking_embed)
@@ -253,20 +283,21 @@ class ApplyView(discord.ui.View):
 
             if not primary_ok:
                 await dm.send(f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[0]}**.\nتأكد من صحة الاسم وأعد المحاولة.")
-                _send_log(interaction, answers, "reject", f"الحساب الأساسي '{answers[0]}' غير موجود على روبلوكس", primary_name, secondary_name, None)
+                _send_log(interaction, answers, "reject", f"الحساب الأساسي '{answers[0]}' غير موجود على روبلوكس", primary_name, secondary_name, None, image_url)
                 return
 
             if not secondary_ok:
                 await dm.send(f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[1]}**.\nتأكد من صحة الاسم وأعد المحاولة.")
-                _send_log(interaction, answers, "reject", f"الحساب الغير أساسي '{answers[1]}' غير موجود على روبلوكس", primary_name, secondary_name, None)
+                _send_log(interaction, answers, "reject", f"الحساب الغير أساسي '{answers[1]}' غير موجود على روبلوكس", primary_name, secondary_name, None, image_url)
                 return
 
             try:
-                result = evaluate_with_ai(primary_name, secondary_name, answers[2], answers[3], answers[4])
+                # الترتيب الجديد لتمرير الأجوبة للـ AI: (العمر هو الترتيب 2، الصورة هي image_url، التعهد هو الترتيب 3، الحلف هو الترتيب 4)
+                result = evaluate_with_ai(primary_name, secondary_name, answers[2], image_url, answers[3], answers[4])
             except Exception:
                 logger.error(f"خطأ أثناء تقييم AI:\n{traceback.format_exc()}")
                 await dm.send("⚠️ صار خطأ أثناء تقييم طلبك بالذكاء الاصطناعي، تواصل مع الإدارة.")
-                _send_log(interaction, answers, "reject", "خطأ تقني أثناء تقييم AI", primary_name, secondary_name, None)
+                _send_log(interaction, answers, "reject", "خطأ تقني أثناء تقييم ومطابقة البيانات بـ AI", primary_name, secondary_name, None, image_url)
                 return
 
             decision = result.get("decision", "reject")
@@ -310,12 +341,12 @@ class ApplyView(discord.ui.View):
             else:
                 reject_embed = discord.Embed(
                     title="❌ نعتذر، تم رفض طلبكِ",
-                    description=f"**السبب:** {reason}\n\nيمكنكِ إعادة التقديم لاحقاً والتأكد من شروط الإجابة والالتزام بالقسم الحقيقي.",
+                    description=f"**السبب:** {reason}\n\nيمكنكِ إعادة التقديم لاحقاً والتأكد من شروط الإجابة ومطابقة لقطة الشاشة المرفقة.",
                     color=discord.Color.red()
                 )
                 await dm.send(embed=reject_embed)
 
-            await _send_log_async(interaction, answers, decision, reason, primary_name, secondary_name, rp_id)
+            await _send_log_async(interaction, answers, decision, reason, primary_name, secondary_name, rp_id, image_url)
 
         except Exception:
             logger.error(f"خطأ أثناء جمع الأجوبة:\n{traceback.format_exc()}")
@@ -323,24 +354,33 @@ class ApplyView(discord.ui.View):
             active_applicants.discard(interaction.user.id)
 
 
-def _send_log(interaction, answers, decision, reason, primary, secondary, rp_id):
-    asyncio.create_task(_send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id))
+def _send_log(interaction, answers, decision, reason, primary, secondary, rp_id, image_url):
+    asyncio.create_task(_send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id, image_url))
 
 
-async def _send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id):
+async def _send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id, image_url):
     color = discord.Color.green() if decision == "accept" else discord.Color.red()
-    embed = discord.Embed(title="📋 طلب رول بلاي — تقييم AI", color=color)
+    embed = discord.Embed(title="📋 طلب رول بلاي — تقييم AI والصورة", color=color)
     embed.add_field(name="العضو", value=interaction.user.mention, inline=False)
     embed.add_field(name="حساب أساسي", value=f"`{primary}`", inline=True)
     embed.add_field(name="حساب غير أساسي", value=f"`{secondary}`", inline=True)
     embed.add_field(name="العمر", value=answers[2] if len(answers) > 2 else "غير معروف", inline=True)
-    embed.add_field(name="التعهد", value=answers[3][:500] if len(answers) > 3 else "غير معروف", inline=False)
-    if len(answers) > 4:
-        embed.add_field(name="حلف التصريح", value=answers[4][:800], inline=False)
+    
+    # جلب التعهد والحلف بناءً على ترتيب الفهارس الجديد في مصفوفة الإجابات
+    pledge_val = answers[3][:500] if len(answers) > 3 else "غير معروف"
+    oath_val = answers[4][:800] if len(answers) > 4 else "غير معروف"
+    
+    embed.add_field(name="التعهد", value=pledge_val, inline=False)
+    embed.add_field(name="حلف التصريح", value=oath_val, inline=False)
+    
     embed.add_field(name="قرار البوت", value="✅ قبول" if decision == "accept" else "❌ رفض", inline=True)
     embed.add_field(name="السبب", value=reason, inline=True)
     if rp_id:
         embed.add_field(name="🆔 رقم الهوية", value=f"`{rp_id}`", inline=True)
+    
+    if image_url:
+        embed.set_image(url=image_url)
+        
     embed.set_footer(text=f"Discord ID: {interaction.user.id}")
 
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
@@ -428,4 +468,4 @@ def run_bot():
         else: break
 
 run_bot()
-            
+        
