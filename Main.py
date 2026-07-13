@@ -8,6 +8,7 @@ import random
 import logging
 import traceback
 import aiohttp
+import re  # تم إضافة مكتبة re لتنظيف الـ JSON المرتجع من الـ AI
 from keep_alive import keep_alive
 
 # ================= الإعدادات =================
@@ -46,7 +47,6 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
-# 🔄 ترتيب الأسئلة الجديد والمعدل تماماً:
 QUESTIONS = [
     "ما هو اسمك الحقيقي؟",
     "اسمك روبلوكس (الأساسي)؟",
@@ -56,26 +56,17 @@ QUESTIONS = [
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
-SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسيرفر رول بلاي على روبلوكس ومحلل صور متقدم.
+# 💡 تم تبسيط التوجيهات وجعل الـ AI مرناً في التحقق لتفادي الرفض العشوائي بسبب جودة الصور
+SYSTEM_PROMPT = """أنت مسؤول مراجعة طلبات تقديم لسيرفر رول بلاي.
+مهمتك التأكد من منطقية البيانات:
+1. العمر: بين 8 و 99 سنة.
+2. الصورة المرفقة: تأكد أنها لقطة شاشة لحساب روبلوكس بشكل عام (تغاضى عن المطابقة الحرفية المعقدة للاسم إذا كانت الصورة صحيحة للحساب لمنع الرفض الخاطئ).
+3. التعهد والقسم: يجب أن يكون المتقدم قد كتبهم بشكل صحيح ومقبول.
 
-ستستلم المعلومات التالية:
-- الاسم الحقيقي للمتقدم
-- اسم الحساب الأساسي المكتوب في روبلوكس
-- عمر المتقدم
-- رابط صورة لقطة الشاشة المرفقة للحساب الشخصي
-- تعهده بالالتزام بالقوانين
-- نص حلف التصريح
-
-معايير التقييم الصارمة:
-1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99.
-2. مطابقة الصورة: يجب عليك تحليل النص والرؤية داخل الصورة المرفقة. تأكد تماماً أن اسم المستخدم الظاهر في الصورة (Username أو Display Name) يطابق "اسم الحساب الأساسي" الذي أدخله المتقدم. إذا كانت الصورة عشوائية، لا تحتوي على حساب روبلوكس، أو الأسماء فيها مختلفة تماماً ولا صلة لها بالاسم المكتوب، ارفض الطلب.
-3. التعهد: يجب أن يكون صريحاً وإيجابياً.
-4. حلف التصريح: يجب استبدال (اسمك) باسمه الحقيقي الواضح والالتزام بالنص الأساسي المذكور في رسالة القسم.
-
-رد فقط بصيغة JSON بدون أي نص إضافي، بهذا الشكل تماماً:
-{"decision": "accept", "reason": "سبب مختصر بالعربي"}
+يجب أن يكون ردك عبارة عن كود JSON فقط ولا تكتب أي كلام آخر قبله أو بعده، بصيغة:
+{"decision": "accept", "reason": "تم قبول طلبك بنجاح"}
 أو
-{"decision": "reject", "reason": "سبب مختصر بالعربي واضح لرفض الصورة أو الأجوبة"}"""
+{"decision": "reject", "reason": "اكتب هنا سبب الرفض الواضح بالعربي"}"""
 
 
 def load_users() -> dict:
@@ -118,29 +109,39 @@ def evaluate_with_ai(real_name: str, primary: str, age: str, image_url: str, ple
         {
             "type": "text",
             "text": (
-                f"الاسم الحقيقي: {real_name}\n"
-                f"الحساب الأساسي المكتوب: {primary}\n"
+                f"الاسم الحقيقي للمتقدم: {real_name}\n"
+                f"حساب روبلوكس الأساسي المكتوب: {primary}\n"
                 f"العمر: {age}\n"
-                f"التعهد بالقوانين: {pledge}\n\n"
-                f"نص القسم الرسمي المطلوب مطابقتة: {OATH_TEXT}\n"
-                f"حلف التصريح الذي كتبه المستخدم: {oath}\n"
-                f"يرجى مطابقة هذه البيانات مع الصورة المرفقة أدناه والتأكد من صحة الحساب والحلف والتعهد والاسم."
+                f"التعهد بالقوانين: {pledge}\n"
+                f"القسم الذي حلفه المتقدم: {oath}\n"
+                f"النص الأصلي للقسم للمطابقة: {OATH_TEXT}"
             )
         }
     ]
     if image_url:
         content.append({"type": "image_url", "image_url": {"url": image_url}})
+        
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.2-90b-vision-preview",
             max_tokens=200,
-            temperature=0.1,
+            temperature=0.2, # زيادة طفيفة لمرونة اتخاذ القرار وعدم التصلب بالرفض
             messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
         )
-        text = response.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
-    except Exception:
-        return {"decision": "reject", "reason": "تعذر تقييم الطلب تلقائياً من خادم الذكاء الاصطناعي"}
+        
+        raw_text = response.choices[0].message.content.strip()
+        
+        # ⚙️ تنظيف برمجي متقدم لعزل الـ JSON لو قام الـ AI بكتابة أي نصوص إضافية بالخطأ
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        if match:
+            json_text = match.group(0)
+            return json.loads(json_text)
+        
+        return json.loads(raw_text)
+    except Exception as e:
+        logger.error(f"فشل تحليل الـ JSON من الـ AI: {e}")
+        # في حال حدوث خطأ تقني في الـ AI، نجعل البوت يرفض تلقائياً لكي يتيح خيار القبول اليدوي للإدارة فوراً ولا يعلق الطلب
+        return {"decision": "reject", "reason": "تعذر مراجعة الصورة تلقائياً (الطلب تحت مراجعة الإدارة الحالية)"}
 
 
 async def execute_acceptance(guild: discord.Guild, user_id: int, real_name: str, primary_name: str) -> str:
@@ -217,7 +218,7 @@ class ApplyView(discord.ui.View):
                 await dm.send(embed=discord.Embed(title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}", description=f"**{q}**", color=0x3498db))
                 try:
                     msg = await bot.wait_for("message", check=check, timeout=300)
-                    if idx == 4: # السؤال الرابع هو رفع الصورة 📸
+                    if idx == 4:
                         if msg.attachments:
                             image_url = msg.attachments[0].url
                             answers.append("[تم إرفاق الصورة]")
@@ -230,9 +231,8 @@ class ApplyView(discord.ui.View):
                     await dm.send("⏳ انتهى الوقت وعُلّق الطلب.")
                     return
 
-            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", description="يتم الآن التحقق من الحساب بالذكاء الاصطناعي ومطابقة الصورة، انتظر ثوانٍ...", color=discord.Color.orange()))
+            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", description="يتم الآن التحقق من البيانات عبر الـ AI، انتظر ثوانٍ...", color=discord.Color.orange()))
             
-            # الفهارس بعد تعديل الأسئلة: answers[0] الاسم الحقيقي، answers[1] حساب روبلوكس
             primary_ok, primary_name = await check_roblox_username(answers[1])
 
             if not primary_ok:
@@ -240,7 +240,6 @@ class ApplyView(discord.ui.View):
                 await _send_log_async(interaction, answers, "reject", f"الحساب '{answers[1]}' غير موجود في روبلوكس", answers[0], primary_name, None, image_url)
                 return
 
-            # تمرير البيانات بالترتيب الجديد للدالة والـ AI
             result = evaluate_with_ai(answers[0], primary_name, answers[2], image_url, answers[3], answers[4])
             decision = result.get("decision", "reject")
             reason = result.get("reason", "بدون سبب")
