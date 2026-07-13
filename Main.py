@@ -46,18 +46,36 @@ OATH_TEXT = (
     "و أن احترم الاعضاء جميعا و أن احترم جميع أعضاء الإدارة"
 )
 
+# 🔄 ترتيب الأسئلة الجديد والمعدل تماماً:
 QUESTIONS = [
+    "ما هو اسمك الحقيقي؟",
     "اسمك روبلوكس (الأساسي)؟",
-    "اسمك روبلوكس (الغير أساسي)؟",
-    "كم عمرك? ",
+    "كم عمرك؟",
     "📸 يرجى إرسال لقطة شاشة (صورة) لحسابك في روبلوكس يظهر فيها اسم الحساب بوضوح:",
     "هل تتعهد بالالتزام الكامل بقوانين السيرفر؟",
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
 SYSTEM_PROMPT = """أنت مسؤول تقييم طلبات انضمام لسيرفر رول بلاي على روبلوكس ومحلل صور متقدم.
-رد فقط بصيغة JSON:
-{"decision": "accept", "reason": "سبب مختصر"} أو {"decision": "reject", "reason": "سبب مختصر"}"""
+
+ستستلم المعلومات التالية:
+- الاسم الحقيقي للمتقدم
+- اسم الحساب الأساسي المكتوب في روبلوكس
+- عمر المتقدم
+- رابط صورة لقطة الشاشة المرفقة للحساب الشخصي
+- تعهده بالالتزام بالقوانين
+- نص حلف التصريح
+
+معايير التقييم الصارمة:
+1. العمر: يجب أن يكون رقماً منطقياً بين 8 و 99.
+2. مطابقة الصورة: يجب عليك تحليل النص والرؤية داخل الصورة المرفقة. تأكد تماماً أن اسم المستخدم الظاهر في الصورة (Username أو Display Name) يطابق "اسم الحساب الأساسي" الذي أدخله المتقدم. إذا كانت الصورة عشوائية، لا تحتوي على حساب روبلوكس، أو الأسماء فيها مختلفة تماماً ولا صلة لها بالاسم المكتوب، ارفض الطلب.
+3. التعهد: يجب أن يكون صريحاً وإيجابياً.
+4. حلف التصريح: يجب استبدال (اسمك) باسمه الحقيقي الواضح والالتزام بالنص الأساسي المذكور في رسالة القسم.
+
+رد فقط بصيغة JSON بدون أي نص إضافي، بهذا الشكل تماماً:
+{"decision": "accept", "reason": "سبب مختصر بالعربي"}
+أو
+{"decision": "reject", "reason": "سبب مختصر بالعربي واضح لرفض الصورة أو الأجوبة"}"""
 
 
 def load_users() -> dict:
@@ -95,8 +113,21 @@ async def check_roblox_username(username: str) -> tuple[bool, str]:
     return False, username
 
 
-def evaluate_with_ai(primary: str, secondary: str, age: str, image_url: str, pledge: str, oath: str) -> dict:
-    content = [{"type": "text", "text": f"أساسي: {primary}\nفرعي: {secondary}\nعمر: {age}\nتعهد: {pledge}\nقسم: {oath}"}]
+def evaluate_with_ai(real_name: str, primary: str, age: str, image_url: str, pledge: str, oath: str) -> dict:
+    content = [
+        {
+            "type": "text",
+            "text": (
+                f"الاسم الحقيقي: {real_name}\n"
+                f"الحساب الأساسي المكتوب: {primary}\n"
+                f"العمر: {age}\n"
+                f"التعهد بالقوانين: {pledge}\n\n"
+                f"نص القسم الرسمي المطلوب مطابقتة: {OATH_TEXT}\n"
+                f"حلف التصريح الذي كتبه المستخدم: {oath}\n"
+                f"يرجى مطابقة هذه البيانات مع الصورة المرفقة أدناه والتأكد من صحة الحساب والحلف والتعهد والاسم."
+            )
+        }
+    ]
     if image_url:
         content.append({"type": "image_url", "image_url": {"url": image_url}})
     try:
@@ -109,11 +140,10 @@ def evaluate_with_ai(primary: str, secondary: str, age: str, image_url: str, ple
         text = response.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
         return json.loads(text)
     except Exception:
-        return {"decision": "reject", "reason": "تعذر تقييم الطلب تلقائياً"}
+        return {"decision": "reject", "reason": "تعذر تقييم الطلب تلقائياً من خادم الذكاء الاصطناعي"}
 
 
-async def execute_acceptance(guild: discord.Guild, user_id: int, primary_name: str, secondary_name: str) -> str:
-    """دالة موحدة لتنفيذ إجراءات القبول ومنح الآيدي واللقب والرتب"""
+async def execute_acceptance(guild: discord.Guild, user_id: int, real_name: str, primary_name: str) -> str:
     rp_id = generate_unique_id()
     member = guild.get_member(user_id)
     
@@ -134,8 +164,8 @@ async def execute_acceptance(guild: discord.Guild, user_id: int, primary_name: s
     users = load_users()
     users[str(user_id)] = {
         "discord_tag": str(member) if member else f"User_{user_id}",
+        "real_name": real_name,
         "roblox_primary": primary_name,
-        "roblox_secondary": secondary_name,
         "rp_id": rp_id
     }
     save_users(users)
@@ -155,7 +185,15 @@ class ApplyView(discord.ui.View):
         active_applicants.add(user_id)
         try:
             dm = await interaction.user.create_dm()
-            welcome = discord.Embed(title="👋 مرحباً بك في التقديم!", description="الرجاء الإجابة على الأسئلة بالخاص.", color=0x3498db)
+            welcome = discord.Embed(
+                title="👋 مرحباً بك في التقديم!",
+                description="الرجاء الإجابة على الأسئلة التالية لتتم مراجعة طلبك.\n\n"
+                            "⚠️ **شروط التقديم:**\n"
+                            "• كل سؤال يجب الرد عليه برسالة منفصلة.\n"
+                            "• السؤال الرابع يتطلب رفع صورة لحسابك.\n"
+                            "• عندك **5 دقائق** للرد على كل سؤال قبل إلغاء الطلب.",
+                color=0x3498db
+            )
             await dm.send(embed=welcome)
             
             await interaction.response.send_message(
@@ -176,59 +214,59 @@ class ApplyView(discord.ui.View):
 
         try:
             for idx, q in enumerate(QUESTIONS, start=1):
-                await dm.send(embed=discord.Embed(title=f"❓ السؤال {idx}", description=f"**{q}**", color=0x3498db))
+                await dm.send(embed=discord.Embed(title=f"❓ السؤال {idx} من أصل {len(QUESTIONS)}", description=f"**{q}**", color=0x3498db))
                 try:
                     msg = await bot.wait_for("message", check=check, timeout=300)
-                    if idx == 4:
+                    if idx == 4: # السؤال الرابع هو رفع الصورة 📸
                         if msg.attachments:
                             image_url = msg.attachments[0].url
-                            answers.append("[صورة مفرقة]")
+                            answers.append("[تم إرفاق الصورة]")
                         else:
-                            await dm.send("❌ تم إلغاء الطلب لعدم إرفاق صورة.")
+                            await dm.send("❌ تم إلغاء الطلب لعدم إرفاق صورة صحيح.")
                             return
                     else:
                         answers.append(msg.content.strip())
                 except asyncio.TimeoutError:
-                    await dm.send("⏳ انتهى الوقت.")
+                    await dm.send("⏳ انتهى الوقت وعُلّق الطلب.")
                     return
 
-            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", color=discord.Color.orange()))
+            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", description="يتم الآن التحقق من الحساب بالذكاء الاصطناعي ومطابقة الصورة، انتظر ثوانٍ...", color=discord.Color.orange()))
             
-            primary_ok, primary_name = await check_roblox_username(answers[0])
-            secondary_ok, secondary_name = await check_roblox_username(answers[1])
+            # الفهارس بعد تعديل الأسئلة: answers[0] الاسم الحقيقي، answers[1] حساب روبلوكس
+            primary_ok, primary_name = await check_roblox_username(answers[1])
 
-            if not primary_ok or not secondary_ok:
-                err_user = answers[0] if not primary_ok else answers[1]
-                await dm.send(f"❌ لم نتمكن من إيجاد الحساب **{err_user}**.")
-                await _send_log_async(interaction, answers, "reject", f"الحساب {err_user} غير موجود بروبلوكس", primary_name, secondary_name, None, image_url)
+            if not primary_ok:
+                await dm.send(f"❌ لم نتمكن من إيجاد حساب روبلوكس باسم **{answers[1]}**.")
+                await _send_log_async(interaction, answers, "reject", f"الحساب '{answers[1]}' غير موجود في روبلوكس", answers[0], primary_name, None, image_url)
                 return
 
-            result = evaluate_with_ai(primary_name, secondary_name, answers[2], image_url, answers[3], answers[4])
+            # تمرير البيانات بالترتيب الجديد للدالة والـ AI
+            result = evaluate_with_ai(answers[0], primary_name, answers[2], image_url, answers[3], answers[4])
             decision = result.get("decision", "reject")
             reason = result.get("reason", "بدون سبب")
 
             rp_id = None
             if decision == "accept":
-                rp_id = await execute_acceptance(interaction.guild, interaction.user.id, primary_name, secondary_name)
-                await dm.send(embed=discord.Embed(title="🎉 تم قبولك!", description=f"🆔 هوية الرول بلاي: `{rp_id}`", color=discord.Color.green()))
+                rp_id = await execute_acceptance(interaction.guild, interaction.user.id, answers[0], primary_name)
+                await dm.send(embed=discord.Embed(title="🎉 تم قبولك!", description=f"🆔 هوية الرول بلاي الخاصة بكِ: `{rp_id}`", color=discord.Color.green()))
             else:
                 await dm.send(embed=discord.Embed(title="❌ نعتذر، تم رفض طلبك تلقائياً", description=f"**السبب:** {reason}\nالإدارة تراجع طلبك الآن وقد يتم قبولك يدوياً.", color=discord.Color.red()))
 
-            await _send_log_async(interaction, answers, decision, reason, primary_name, secondary_name, rp_id, image_url)
+            await _send_log_async(interaction, answers, decision, reason, answers[0], primary_name, rp_id, image_url)
 
         except Exception: logger.error(traceback.format_exc())
         finally: active_applicants.discard(interaction.user.id)
 
 
-async def _send_log_async(interaction, answers, decision, reason, primary, secondary, rp_id, image_url):
+async def _send_log_async(interaction, answers, decision, reason, real_name, primary, rp_id, image_url):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     if not log_channel: return
 
     color = discord.Color.green() if decision == "accept" else discord.Color.red()
     embed = discord.Embed(title="📋 طلب رول بلاي جديد", color=color)
     embed.add_field(name="العضو", value=interaction.user.mention, inline=False)
-    embed.add_field(name="حساب أساسي", value=f"`{primary}`", inline=True)
-    embed.add_field(name="حساب غير أساسي", value=f"`{secondary}`", inline=True)
+    embed.add_field(name="الاسم الحقيقي", value=f"`{real_name}`", inline=True)
+    embed.add_field(name="حساب روبلوكس", value=f"`{primary}`", inline=True)
     embed.add_field(name="العمر", value=answers[2] if len(answers) > 2 else "غير معروف", inline=True)
     embed.add_field(name="قرار البوت الحالي", value="✅ قبول تلقائي" if decision == "accept" else "❌ رفض تلقائي", inline=True)
     embed.add_field(name="السبب", value=reason, inline=True)
@@ -237,22 +275,20 @@ async def _send_log_async(interaction, answers, decision, reason, primary, secon
     if image_url: embed.set_image(url=image_url)
     embed.set_footer(text=f"User ID: {interaction.user.id}")
 
-    # تحديد أي لوحة أزرار تظهر للإدارة بناءً على قرار البوت
     if decision == "accept":
         view = RevokeView(interaction.user.id)
     else:
-        view = StaffOverrideView(interaction.user.id, primary, secondary)
+        view = StaffOverrideView(interaction.user.id, real_name, primary)
 
     await log_channel.send(embed=embed, view=view)
 
 
 class StaffOverrideView(discord.ui.View):
-    """لوحة أزرار تظهر للإدارة فقط في حالة الرفض للقبول اليدوي وتخطي قرار البوت"""
-    def __init__(self, applicant_id: int, primary: str, secondary: str):
+    def __init__(self, applicant_id: int, real_name: str, primary: str):
         super().__init__(timeout=None)
         self.applicant_id = applicant_id
+        self.real_name = real_name
         self.primary = primary
-        self.secondary = secondary
 
     @discord.ui.button(label="قبول يدوياً وتوليد هوية", style=discord.ButtonStyle.success, emoji="🟢")
     async def manual_accept(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -261,25 +297,19 @@ class StaffOverrideView(discord.ui.View):
             return await interaction.response.send_message("❌ ما تملك صلاحية الإدارة.", ephemeral=True)
 
         await interaction.response.defer()
-        
-        # تنفيذ عملية القبول الكاملة (الرتب، النيك نيم، التخزين)
-        rp_id = await execute_acceptance(interaction.guild, self.applicant_id, self.primary, self.secondary)
+        rp_id = await execute_acceptance(interaction.guild, self.applicant_id, self.real_name, self.primary)
 
-        # إخطار العضو في الخاص بقبوله اليدوي
         member = interaction.guild.get_member(self.applicant_id)
         if member:
             try:
-                embed_dm = discord.Embed(title="🎉 تحديث: تم قبولك يدوياً!", description=f"قامت الإدارة بمراجعة طلبك وقبوله.\n🆔 **هوية الرول بلاي الخاصة بك:** `{rp_id}`", color=discord.Color.green())
+                embed_dm = discord.Embed(title="🎉 تحديث: تم قبولك يدوياً!", description=f"قامت الإدارة بمراجعة طلبك وقبوله يدوياً.\n🆔 **هوية الرول بلاي الخاصة بك:** `{rp_id}`", color=discord.Color.green())
                 await member.send(embed=embed_dm)
             except: pass
 
-        # تحديث رسالة اللوج لتوضيح التغيير وتعطيل الأزرار
         for child in self.children: child.disabled = True
-        
         original_embed = interaction.message.embeds[0]
         original_embed.color = discord.Color.green()
         original_embed.add_field(name="تعديل الإدارة", value=f"🟢 تم القبول يدوياً بواسطة {interaction.user.mention}\n🆔 الهوية الممنوحة: `{rp_id}`", inline=False)
-        
         await interaction.message.edit(embed=original_embed, view=self)
 
     @discord.ui.button(label="إبقاء الرفض", style=discord.ButtonStyle.secondary, emoji="🔒")
@@ -292,7 +322,6 @@ class StaffOverrideView(discord.ui.View):
         original_embed = interaction.message.embeds[0]
         original_embed.add_field(name="تعديل الإدارة", value=f"🔒 تم تأكيد الرفض وإغلاق الطلب بواسطة {interaction.user.mention}", inline=False)
         await interaction.message.edit(embed=original_embed, view=self)
-        await interaction.response.send_message("تم إغلاق الطلب وتأكيد الرفذ.", ephemeral=True)
 
 
 class RevokeView(discord.ui.View):
@@ -321,7 +350,6 @@ class RevokeView(discord.ui.View):
         button.disabled = True
         button.label = "تم السحب"
         await interaction.message.edit(view=self)
-        await interaction.response.send_message(f"تم سحب القبول بواسطة {interaction.user.mention}", ephemeral=False)
 
 
 @bot.command()
@@ -339,6 +367,10 @@ async def on_ready():
     await bot.change_presence(status=discord.Status.online, activity=discord.CustomActivity(name="Distributing"))
     logger.info(f"✅ البوت شغال باسم {bot.user}")
 
-run_bot = lambda: [keep_alive(), bot.run(TOKEN, log_handler=None)]
+
+def run_bot():
+    keep_alive()
+    bot.run(TOKEN, log_handler=None)
+
 if __name__ == "__main__": run_bot()
-        
+    
