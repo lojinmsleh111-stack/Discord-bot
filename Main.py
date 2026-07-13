@@ -8,7 +8,7 @@ import random
 import logging
 import traceback
 import aiohttp
-import re  # تم إضافة مكتبة re لتنظيف الـ JSON المرتجع من الـ AI
+import re
 from keep_alive import keep_alive
 
 # ================= الإعدادات =================
@@ -56,17 +56,17 @@ QUESTIONS = [
     f"اكتب القسم التالي بالكامل واستبدل (اسمك) باسمك الحقيقي، ثم أرسله كرسالة:\n\n\"{OATH_TEXT}\""
 ]
 
-# 💡 تم تبسيط التوجيهات وجعل الـ AI مرناً في التحقق لتفادي الرفض العشوائي بسبب جودة الصور
-SYSTEM_PROMPT = """أنت مسؤول مراجعة طلبات تقديم لسيرفر رول بلاي.
-مهمتك التأكد من منطقية البيانات:
-1. العمر: بين 8 و 99 سنة.
-2. الصورة المرفقة: تأكد أنها لقطة شاشة لحساب روبلوكس بشكل عام (تغاضى عن المطابقة الحرفية المعقدة للاسم إذا كانت الصورة صحيحة للحساب لمنع الرفض الخاطئ).
-3. التعهد والقسم: يجب أن يكون المتقدم قد كتبهم بشكل صحيح ومقبول.
+# 🧠 تم تعديل الـ Prompt لفحص النصوص بدقة وعقلانية تامة
+SYSTEM_PROMPT = """أنت مسؤول مراجعة وتدقيق نصوص طلبات الانضمام لسيرفر رول بلاي.
+يجب عليك التحقق من منطقية البيانات التالية:
+1. العمر: يجب أن يكون رقماً منطقياً (مثلاً بين 8 و 99).
+2. التعهد: يجب أن يكون موافقاً وبشكل إيجابي.
+3. القسم: يجب أن يكون قد كتب نص القسم بشكل سليم وقام باستبدال (اسمك) باسم حقيقي.
 
-يجب أن يكون ردك عبارة عن كود JSON فقط ولا تكتب أي كلام آخر قبله أو بعده، بصيغة:
-{"decision": "accept", "reason": "تم قبول طلبك بنجاح"}
+ردك يجب أن يكون كود JSON فقط دون أي مقدمات أو مؤخرات كالتالي:
+{"decision": "accept", "reason": "البيانات والقسم مكتوب بشكل صحيح"}
 أو
-{"decision": "reject", "reason": "اكتب هنا سبب الرفض الواضح بالعربي"}"""
+{"decision": "reject", "reason": "سبب الرفض المنطقي هنا"}"""
 
 
 def load_users() -> dict:
@@ -104,44 +104,34 @@ async def check_roblox_username(username: str) -> tuple[bool, str]:
     return False, username
 
 
-def evaluate_with_ai(real_name: str, primary: str, age: str, image_url: str, pledge: str, oath: str) -> dict:
-    content = [
-        {
-            "type": "text",
-            "text": (
-                f"الاسم الحقيقي للمتقدم: {real_name}\n"
-                f"حساب روبلوكس الأساسي المكتوب: {primary}\n"
-                f"العمر: {age}\n"
-                f"التعهد بالقوانين: {pledge}\n"
-                f"القسم الذي حلفه المتقدم: {oath}\n"
-                f"النص الأصلي للقسم للمطابقة: {OATH_TEXT}"
-            )
-        }
-    ]
-    if image_url:
-        content.append({"type": "image_url", "image_url": {"url": image_url}})
+def evaluate_with_ai(real_name: str, primary: str, age: str, pledge: str, oath: str) -> dict:
+    # تم إزالة الصورة من هنا لضمان سرعة واستقرار استجابة Groq وعدم حدوث رفض خاطئ
+    text_content = (
+        f"الاسم الحقيقي: {real_name}\n"
+        f"حساب روبلوكس: {primary}\n"
+        f"العمر: {age}\n"
+        f"التعهد: {pledge}\n"
+        f"القسم المكتوب: {oath}\n"
+        f"القسم المطلوب: {OATH_TEXT}"
+    )
         
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview",
-            max_tokens=200,
-            temperature=0.2, # زيادة طفيفة لمرونة اتخاذ القرار وعدم التصلب بالرفض
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
+            model="llama3-8b-8192", # استخدام نموذج النصوص المستقر والسريع جداً لتفادي أخطاء الرؤية
+            max_tokens=150,
+            temperature=0.1,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": text_content}]
         )
         
         raw_text = response.choices[0].message.content.strip()
-        
-        # ⚙️ تنظيف برمجي متقدم لعزل الـ JSON لو قام الـ AI بكتابة أي نصوص إضافية بالخطأ
         match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         if match:
-            json_text = match.group(0)
-            return json.loads(json_text)
-        
+            return json.loads(match.group(0))
         return json.loads(raw_text)
     except Exception as e:
-        logger.error(f"فشل تحليل الـ JSON من الـ AI: {e}")
-        # في حال حدوث خطأ تقني في الـ AI، نجعل البوت يرفض تلقائياً لكي يتيح خيار القبول اليدوي للإدارة فوراً ولا يعلق الطلب
-        return {"decision": "reject", "reason": "تعذر مراجعة الصورة تلقائياً (الطلب تحت مراجعة الإدارة الحالية)"}
+        logger.error(f"Error in AI evaluation: {e}")
+        # حماية: في حال حدوث ضغط على سيرفر AI، يرفض تلقائياً لتتحكم الإدارة عبر الأزرار يدوياً
+        return {"decision": "reject", "reason": "فشل فحص الذكاء الاصطناعي التلقائي (متاح للمراجعة الإدارية)"}
 
 
 async def execute_acceptance(guild: discord.Guild, user_id: int, real_name: str, primary_name: str) -> str:
@@ -231,7 +221,7 @@ class ApplyView(discord.ui.View):
                     await dm.send("⏳ انتهى الوقت وعُلّق الطلب.")
                     return
 
-            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", description="يتم الآن التحقق من البيانات عبر الـ AI، انتظر ثوانٍ...", color=discord.Color.orange()))
+            await dm.send(embed=discord.Embed(title="🔍 جاري المعالجة والمطابقة...", description="يتم الآن معالجة بياناتك، انتظر ثوانٍ...", color=discord.Color.orange()))
             
             primary_ok, primary_name = await check_roblox_username(answers[1])
 
@@ -240,7 +230,8 @@ class ApplyView(discord.ui.View):
                 await _send_log_async(interaction, answers, "reject", f"الحساب '{answers[1]}' غير موجود في روبلوكس", answers[0], primary_name, None, image_url)
                 return
 
-            result = evaluate_with_ai(answers[0], primary_name, answers[2], image_url, answers[3], answers[4])
+            # التقييم المستقر بالنصوص
+            result = evaluate_with_ai(answers[0], primary_name, answers[2], answers[3], answers[4])
             decision = result.get("decision", "reject")
             reason = result.get("reason", "بدون سبب")
 
@@ -271,7 +262,7 @@ async def _send_log_async(interaction, answers, decision, reason, real_name, pri
     embed.add_field(name="السبب", value=reason, inline=True)
     
     if rp_id: embed.add_field(name="🆔 رقم الهوية", value=f"`{rp_id}`", inline=True)
-    if image_url: embed.set_image(url=image_url)
+    if image_url: embed.set_image(url=image_url) # تظهر الصورة هنا دائماً للإدارة بشكل رائع لتفقدها بالعين المجردة
     embed.set_footer(text=f"User ID: {interaction.user.id}")
 
     if decision == "accept":
@@ -372,4 +363,4 @@ def run_bot():
     bot.run(TOKEN, log_handler=None)
 
 if __name__ == "__main__": run_bot()
-    
+            
