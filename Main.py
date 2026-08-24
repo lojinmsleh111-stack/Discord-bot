@@ -1,3 +1,4 @@
+from permit_ai import setup_permit_system
 import os, asyncio
 from threading import Thread
 import discord
@@ -244,7 +245,11 @@ async def ticket_panel(i):
 
 @bot.event
 async def setup_hook():
-    bot.add_view(TicketPanelView()); bot.add_view(TicketControlView()); bot.add_view(PaymentView())
+    bot.add_view(TicketPanelView())
+    bot.add_view(TicketControlView())
+    bot.add_view(PaymentView())
+
+    await setup_permit_system(bot)
 
 @bot.event
 async def on_ready():
