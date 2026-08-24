@@ -1370,6 +1370,6 @@ if not TOKEN:
     raise RuntimeError(
         "BOT_TOKEN غير موجود في Environment Variables"
     )
-
+keep_alive()
 bot.run(TOKEN)
            
